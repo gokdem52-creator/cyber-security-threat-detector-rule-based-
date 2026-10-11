@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Threat Detector</title>
+<style>
+:root{--bg:#0b1220;--card:#121b2e;--line:#22304a;--ink:#e6edf7;--mute:#8ea0bd;--critical:#ff4d6d;--high:#ff9f43;--medium:#ffd166;--low:#4cc9f0;--accent:#6c8cff}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
+header{display:flex;flex-wrap:wrap;gap:12px;justify-content:space-between;align-items:center;padding:16px 24px;border-bottom:1px solid var(--line)}
+h1{font-size:18px;margin:0}h1 span{color:var(--accent)}
+button,select,input{font:inherit;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:8px;padding:7px 12px}
+button{cursor:pointer}button.p{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}button.d{color:var(--critical)}
+main{max-width:1200px;margin:0 auto;padding:20px 24px}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+.card .n{font-size:28px;font-weight:700}.card .l{color:var(--mute);font-size:12px;text-transform:uppercase;letter-spacing:.05em}
+.panels{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:12px;margin:12px 0}
+h2{font-size:13px;margin:0 0 10px;color:var(--mute);text-transform:uppercase;letter-spacing:.05em}
+.bar{display:grid;grid-template-columns:150px 1fr 36px;gap:8px;align-items:center;margin:5px 0;font-size:13px}
+.bar .t{height:10px;background:var(--line);border-radius:5px;overflow:hidden}.bar .t i{display:block;height:100%;border-radius:5px}
+.bar .k{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.bar .v{text-align:right;color:var(--mute)}
+.donut{display:flex;gap:18px;align-items:center}.ring{width:120px;height:120px;border-radius:50%;flex:none;position:relative}
+.ring::after{content:"";position:absolute;inset:24px;background:var(--card);border-radius:50%}
+.leg div{margin:3px 0}.dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px}
+.tools{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px}.tools input{flex:1;min-width:160px}
+.wrap{overflow-x:auto}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:8px 10px;border-top:1px solid var(--line);vertical-align:top}
+th{color:var(--mute);font-size:12px;text-transform:uppercase}td.ev{color:var(--mute);font:12px ui-monospace,Menlo,monospace;word-break:break-all;max-width:380px}
+.b{padding:2px 8px;border-radius:99px;font-size:11px;font-weight:700;text-transform:uppercase;color:#10151f}
+.empty{color:var(--mute);padding:20px;text-align:center}#msg{color:var(--mute);font-size:13px}
+</style></head><body>
+<header><h1>🛡️ <span>Threat</span> Detector</h1>
+<div class="tools" style="margin:0">
+<span id="msg"></span>
+<button class="p" id="demo">Load demo data</button>
+<button id="up">Upload log file</button><input type="file" id="file" hidden>
+<button class="d" id="clear">Clear</button></div></header>
+<main>
+<div class="cards" id="cards"></div>
+<div class="panels">
+<div class="card"><h2>Alerts by severity</h2><div class="donut"><div class="ring" id="ring"></div><div class="leg" id="leg"></div></div></div>
+<div class="card"><h2>Alerts by rule</h2><div id="rules"></div></div>
+<div class="card"><h2>Top source IPs</h2><div id="ips"></div></div>
+<div class="card"><h2>Alert timeline (10-min buckets)</h2><div id="tl"></div></div>
+</div>
+<div class="card"><h2>Alerts</h2>
+<div class="tools"><select id="sev"><option value="">All severities</option><option>critical</option><option>high</option><option>medium</option><option>low</option></select>
+<input id="q" placeholder="Filter by IP, rule or description"></div>
+<div class="wrap"><table><thead><tr><th>Time</th><th>Severity</th><th>Rule</th><th>Source IP</th><th>Details</th></tr></thead><tbody id="rows"></tbody></table></div></div>
+</main>
+<script>
+const $=s=>document.querySelector(s),SEV=["critical","high","medium","low"];
+const col=s=>`var(--${s})`;
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+async function api(p,o){const r=await fetch(p,o);if(!r.ok)throw new Error(await r.text());return r.json()}
+function bars(el,rows,color){const max=Math.max(1,...rows.map(r=>r.v));
+ el.innerHTML=rows.length?rows.map(r=>`<div class="bar"><span class="k" title="${esc(r.k)}">${esc(r.k)}</span><span class="t"><i style="width:${r.v/max*100}%;background:${color(r)}"></i></span><span class="v">${r.v}</span></div>`).join(""):'<div class="empty">No data</div>'}
+function render(s){
+ const bs=s.by_severity,sv=k=>bs[k]||0;
+ $("#cards").innerHTML=[["Lines processed",s.lines_processed],["Total alerts",s.total_alerts],["Critical",sv("critical")],["High",sv("high")]]
+  .map(([l,n])=>`<div class="card"><div class="n">${n.toLocaleString()}</div><div class="l">${l}</div></div>`).join("");
+ let acc=0;const tot=s.total_alerts||1;
+ const stops=SEV.filter(k=>sv(k)).map(k=>{const a=acc/tot*360;acc+=sv(k);return `${col(k)} ${a}deg ${acc/tot*360}deg`});
+ $("#ring").style.background=stops.length?`conic-gradient(${stops.join(",")})`:"var(--line)";
+ $("#leg").innerHTML=SEV.map(k=>`<div><span class="dot" style="background:${col(k)}"></span>${k} <b>${sv(k)}</b></div>`).join("");
+ bars($("#rules"),s.by_rule.map(r=>({k:r.rule,v:r.count,s:r.severity})),r=>col(r.s));
+ bars($("#ips"),s.top_ips.map(r=>({k:r.ip,v:r.count})),()=>"var(--accent)");
+ const t=s.timeline,m=Math.max(1,...t.map(x=>x.count)),w=100/Math.max(t.length,1);
+ $("#tl").innerHTML=t.length?`<svg viewBox="0 0 100 40" preserveAspectRatio="none" width="100%" height="120">${t.map((x,i)=>`<rect x="${i*w+.3}" y="${40-x.count/m*38}" width="${w-.6}" height="${x.count/m*38}" fill="var(--accent)"><title>${esc(x.bucket)}: ${x.count}</title></rect>`).join("")}</svg><div style="display:flex;justify-content:space-between;color:var(--mute);font-size:11px"><span>${esc(t[0].bucket.slice(5).replace("T"," "))}</span><span>${esc(t[t.length-1].bucket.slice(5).replace("T"," "))}</span></div>`:'<div class="empty">No data</div>'}
+async function load(){
+ const q=new URLSearchParams();if($("#sev").value)q.set("severity",$("#sev").value);if($("#q").value.trim())q.set("q",$("#q").value.trim());
+ const [s,a]=await Promise.all([api("/api/stats"),api("/api/alerts?"+q)]);render(s);
+ const order={critical:0,high:1,medium:2,low:3};
+ $("#rows").innerHTML=a.length?a.map(x=>`<tr><td>${esc(x.ts.replace("T"," ").slice(0,19))}</td><td><span class="b" style="background:${col(x.severity)}">${esc(x.severity)}</span></td><td>${esc(x.rule)}</td><td>${esc(x.ip)}</td><td>${esc(x.description)}<div class="ev">${esc(x.evidence)}</div></td></tr>`).join(""):'<tr><td colspan="5" class="empty">No alerts. Load demo data or upload a log file.</td></tr>'}
+const say=t=>$("#msg").textContent=t;
+async function run(fn){try{await fn();await load()}catch(e){say("Error: "+e.message)}}
+$("#demo").onclick=()=>run(async()=>{const r=await api("/api/demo",{method:"POST"});say(`Analyzed ${r.lines} lines, ${r.alerts} alerts`)});
+$("#clear").onclick=()=>run(async()=>{await api("/api/alerts",{method:"DELETE"});say("Cleared")});
+$("#up").onclick=()=>$("#file").click();
+$("#file").onchange=e=>{const f=e.target.files[0];if(!f)return;const rd=new FileReader();
+ rd.onload=()=>run(async()=>{const r=await api("/api/logs",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({logs:rd.result})});say(`${f.name}: ${r.parsed}/${r.lines} lines parsed, ${r.alerts} alerts`)});rd.readAsText(f);e.target.value=""};
+$("#sev").onchange=load;let tm;$("#q").oninput=()=>{clearTimeout(tm);tm=setTimeout(load,250)};
+load();
+</script></body></html>
